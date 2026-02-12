@@ -693,6 +693,130 @@ graph TB
 
 ---
 
+## 15. 하이브리드 라우팅 정책 (Claude + Codex)
+
+### 15.1 운영 목적
+
+- `agent-monitor`를 유지하면서도 구현 효율(속도/토큰/반복 처리)을 높인다.
+- 모든 상태 추적은 Claude Task 시스템에 남기고, 실행 엔진만 동적으로 선택한다.
+
+### 15.2 아키텍처 역할 분리
+
+| Plane | 소유 주체 | 역할 |
+|------|----------|------|
+| Control Plane | manager-orchestrator | 요청 분해, 레벨 판정, 라우팅, 최종 승인 |
+| Execution Plane | Claude Specialist / Codex | 실제 코드 작성, 테스트 실행, 수정 반복 |
+| Observability Plane | agent-monitor | 팀/태스크 상태 가시화 |
+
+핵심 제약:
+- Codex가 코드를 작성하더라도 Task 상태 변경은 Manager만 수행한다.
+- Specialist는 결과를 도메인 관점에서 1차 검증하고, Manager가 최종 승인한다.
+
+### 15.3 레벨 기반 라우팅 알고리즘 (L0-L4)
+
+점수 모델:
+
+| 항목 | 조건 | 점수 |
+|------|------|------|
+| 변경 파일 수 | 1-3: 0, 4-10: 2, 11+: 4 |
+| 도메인 수(UI/API/DB/인프라) | 1: 0, 2: 2, 3+: 4 |
+| 위험도 | 낮음: 0, 중간: 2, 높음: 4 |
+| 검증 난이도 | smoke: 0, unit+integration: 2, e2e+security: 4 |
+| 외부 영향도 | 내부만: 0, 사용자 노출: 2, 권한/결제/운영핵심: 4 |
+
+레벨 매핑:
+- 0-3점: L0
+- 4-7점: L1
+- 8-11점: L2
+- 12-15점: L3
+- 16-20점: L4
+
+레벨별 기본 경로:
+
+| Level | 기본 경로 | Codex 사용 |
+|------|-----------|------------|
+| L0 | sonnet 단독 처리 | 금지 |
+| L1 | sonnet + 빠른 로컬 검증 | 필요 시 제한적 |
+| L2 | `opusplan` 계획 -> sonnet 구현 | 권장 |
+| L3 | 8-Phase + 병렬 specialist | 적극 권장 |
+| L4 | L3 + 보안 게이트 강제 | 필수 후보 |
+
+### 15.4 Codex Handoff 상태전이
+
+```mermaid
+stateDiagram-v2
+    [*] --> Classified
+    Classified --> ClaudePath: L0/L1 or no-handoff
+    Classified --> HandoffPrepared: L2+/eligible
+    HandoffPrepared --> CodexRunning
+    CodexRunning --> Returned
+    Returned --> SpecialistValidation
+    SpecialistValidation --> ManagerGate
+    ManagerGate --> Completed: pass
+    ManagerGate --> Rework: fail
+    Rework --> CodexRunning
+    Completed --> [*]
+```
+
+필수 규칙:
+- `HandoffPrepared` 이전에 파일 경계(`in_scope`, `out_of_scope`)가 명시되지 않으면 실행 금지.
+- `Returned` 상태에서 diff/테스트 결과가 누락되면 `Rework`로 즉시 되돌린다.
+
+### 15.5 Handoff 템플릿 (필수 필드)
+
+```text
+handoff_id:
+source_task_id:
+level:
+owner_agent:
+objective:
+in_scope_files:
+out_of_scope_files:
+acceptance_criteria:
+verification_commands:
+expected_output_format:
+rollback_plan:
+```
+
+권장 acceptance_criteria 형식:
+- 기능 기준 1-3개
+- 회귀 금지 조건 1-2개
+- 성능/보안 기준(필요 시) 1개
+
+### 15.6 Git 기반 회수 및 검증 표준
+
+Manager 회수 절차:
+1. `git diff --name-only <base>...<head>`로 변경 스코프 확인
+2. 변경 파일별 핵심 diff 검토
+3. 영향 범위 테스트만 우선 실행
+4. 실패 시 해당 테스트 로그만 추가 수집
+
+필수 검증 게이트:
+- `build` 통과
+- `typecheck` 통과
+- 관련 테스트 통과
+- Hook 정책 위반 없음
+- L4는 security specialist 승인 포함
+
+### 15.7 Agent Monitor 일관성 유지 규칙
+
+다음 규칙을 지키면 monitor가 갈라지지 않는다:
+- 작업 시작: Manager가 Claude Task를 `in_progress`로 전이
+- Codex handoff: 동일 Task에 `activeForm`을 handoff 상태로 갱신
+- 작업 완료: Manager가 결과 반영 후 `completed`로 전이
+- 차단 발생: `blockedBy`/`blocks`를 Claude Task에 즉시 반영
+
+### 15.8 실패 복구 전략
+
+| 실패 유형 | 처리 |
+|----------|------|
+| Codex 결과 불완전 | 동일 handoff_id로 1회 재요청 |
+| 검증 실패 | Specialist 원인분석 -> 수정 handoff |
+| 2회 연속 실패 | Claude specialist 직접 처리 경로로 강등 |
+| 고위험 영역 반복 실패 | 사용자 승인 대기 + 수동 검토 |
+
+---
+
 ## 관련 문서
 
 | 문서 | 내용 | 경로 |
@@ -700,4 +824,5 @@ graph TB
 | Agent 정의 | Manager의 전체 규칙, Specialist 가이드 | `agents/manager-orchestrator.md` |
 | Hooks 통합 | Phase별 Hook 개입 상세 | `docs/manager-orchestrator-workflow-with-hooks.md` |
 | 시각화용 | 다이어그램/인포그래픽 데이터 | `docs/manager-orchestrator-workflow-visual.md` |
+| 하이브리드 운영 | Claude+Codex 라우팅/핸드오프 실전 템플릿 | `docs/hybrid-routing-playbook.md` |
 | Excalidraw | 8-Phase 인터랙티브 다이어그램 | [Excalidraw Link](https://excalidraw.com/#json=vA4hLE1O0stjimrC-i5r7,dJfGWkezbUzvSdmETZiNtg) |
