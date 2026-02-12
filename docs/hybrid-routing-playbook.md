@@ -40,7 +40,7 @@
 | Level | 기본 경로 | 병렬 | Codex |
 |------|-----------|------|------|
 | L0 | sonnet 단독 | 없음 | 사용 안 함 |
-| L1 | sonnet + 빠른 검증 | 제한적 | 선택 |
+| L1 | sonnet + 빠른 검증 | 제한적 | 기본 금지 (승인 예외) |
 | L2 | `opusplan` -> sonnet | 가능 | 권장 |
 | L3 | 8-Phase full | 적극 권장 | 적극 권장 |
 | L4 | L3 + 보안 게이트 | 적극 권장 | 필수 후보 |
@@ -82,6 +82,14 @@ scripts/run-codex-handoff.sh handoffs/HOFF-YYYYMMDD-001.txt .
 ```bash
 command -v codex >/dev/null && codex exec --help >/dev/null
 ```
+
+## 4.2) Codex Guardrails
+
+1. L0/L1은 Codex 호출 금지
+2. L1 예외는 사용자 승인 1회만 허용
+3. 동일 `source_task_id` 기준 15분 쿨다운
+4. 재호출 시 실패 로그 요약 필수
+5. 예상 변경 파일 `<4` AND 테스트 영향 `<=1`이면 Codex 호출 금지
 
 ## 5) Manager Prompt Skeleton (for Codex)
 

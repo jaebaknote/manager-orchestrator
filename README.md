@@ -741,7 +741,7 @@ graph TB
 | Level | 기본 경로 | Codex 사용 |
 |------|-----------|------------|
 | L0 | sonnet 단독 처리 | 금지 |
-| L1 | sonnet + 빠른 로컬 검증 | 필요 시 제한적 |
+| L1 | sonnet + 빠른 로컬 검증 | 기본 금지 (사용자 승인 시 1회 예외) |
 | L2 | `opusplan` 계획 -> sonnet 구현 | 권장 |
 | L3 | 8-Phase + 병렬 specialist | 적극 권장 |
 | L4 | L3 + 보안 게이트 강제 | 필수 후보 |
@@ -793,6 +793,12 @@ rollback_plan:
 사전 점검:
 1. `command -v codex >/dev/null`
 2. 실패 시 Claude specialist 경로로 폴백
+
+과호출 방지 가드:
+1. L0/L1은 Codex 호출 금지
+2. 동일 `source_task_id`는 Codex handoff 후 15분 쿨다운
+3. 재호출 시 직전 실패 원인/로그 요약 필수
+4. 예상 변경 파일 `<4` AND 예상 테스트 영향 `<=1`이면 Codex 호출 금지
 
 표준 실행:
 1. `scripts/run-codex-handoff.sh <handoff_file> <workdir>`
