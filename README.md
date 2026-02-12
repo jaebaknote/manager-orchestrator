@@ -700,6 +700,11 @@ graph TB
 - `agent-monitor`를 유지하면서도 구현 효율(속도/토큰/반복 처리)을 높인다.
 - 모든 상태 추적은 Claude Task 시스템에 남기고, 실행 엔진만 동적으로 선택한다.
 
+운영 모드:
+- **Mode A (Agent Teams)**: TeamCreate 기반. `~/.claude/teams/*` + `~/.claude/tasks/*`를 모두 사용.
+- **Mode B (Subagent Task)**: Task 도구 기반. 기본적으로 `~/.claude/tasks/*`만 사용.
+- **Mode B + Bootstrap**: P1에서 `~/.claude/teams/{team}/config.json`과 inbox skeleton을 생성해 monitor 호환 계층 제공.
+
 ### 15.2 아키텍처 역할 분리
 
 | Plane | 소유 주체 | 역할 |
@@ -783,13 +788,30 @@ rollback_plan:
 - 회귀 금지 조건 1-2개
 - 성능/보안 기준(필요 시) 1개
 
-### 15.6 Git 기반 회수 및 검증 표준
+### 15.6 Codex 호출 표준
+
+사전 점검:
+1. `command -v codex >/dev/null`
+2. 실패 시 Claude specialist 경로로 폴백
+
+표준 실행:
+1. `scripts/run-codex-handoff.sh <handoff_file> <workdir>`
+2. 출력 아티팩트:
+   - `.codex-handoffs/<timestamp>-<handoff_id>/events.jsonl`
+   - `.codex-handoffs/<timestamp>-<handoff_id>/final.txt`
+
+Codex 2회 연속 실패 시:
+- handoff를 중단하고 specialist direct path로 강등한다.
+
+### 15.7 Git 기반 회수 및 검증 표준
 
 Manager 회수 절차:
-1. `git diff --name-only <base>...<head>`로 변경 스코프 확인
-2. 변경 파일별 핵심 diff 검토
-3. 영향 범위 테스트만 우선 실행
-4. 실패 시 해당 테스트 로그만 추가 수집
+1. Codex 브랜치 이름을 `codex/<handoff_id>`로 고정
+2. `BASE=$(git merge-base main codex/<handoff_id>)`
+3. `git diff --name-only "$BASE"...codex/<handoff_id>`로 스코프 확인
+4. 변경 파일별 핵심 diff 검토
+5. 영향 범위 테스트만 우선 실행
+6. 실패 시 해당 테스트 로그만 추가 수집
 
 필수 검증 게이트:
 - `build` 통과
@@ -798,15 +820,20 @@ Manager 회수 절차:
 - Hook 정책 위반 없음
 - L4는 security specialist 승인 포함
 
-### 15.7 Agent Monitor 일관성 유지 규칙
+### 15.8 Agent Monitor 일관성 유지 규칙
 
 다음 규칙을 지키면 monitor가 갈라지지 않는다:
+- Mode(A/B/B+Bootstrap)를 P1에서 먼저 명시한다.
 - 작업 시작: Manager가 Claude Task를 `in_progress`로 전이
 - Codex handoff: 동일 Task에 `activeForm`을 handoff 상태로 갱신
 - 작업 완료: Manager가 결과 반영 후 `completed`로 전이
 - 차단 발생: `blockedBy`/`blocks`를 Claude Task에 즉시 반영
 
-### 15.8 실패 복구 전략
+Mode B(Subagent-only) 제약:
+- `~/.claude/teams/*`가 자동 생성되지 않으므로 팀 대시보드는 기본 비활성.
+- 팀 뷰가 필요하면 Mode B+Bootstrap 또는 Mode A로 전환한다.
+
+### 15.9 실패 복구 전략
 
 | 실패 유형 | 처리 |
 |----------|------|

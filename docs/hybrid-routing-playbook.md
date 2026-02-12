@@ -5,11 +5,18 @@
 ## 1) Quick Start
 
 1. 작업을 L0-L4로 판정한다.
-2. 레벨별 기본 경로를 선택한다.
-3. Codex handoff가 필요하면 템플릿을 채운다.
-4. 결과를 git diff 기준으로 회수한다.
-5. specialist 1차 검증 후 manager 최종 승인한다.
-6. Claude Task 상태를 갱신한다.
+2. 운영 모드(Mode A / Mode B / Mode B+Bootstrap)를 선언한다.
+3. 레벨별 기본 경로를 선택한다.
+4. Codex handoff가 필요하면 템플릿을 채운다.
+5. `scripts/run-codex-handoff.sh`로 실행한다.
+6. 결과를 git diff 기준으로 회수한다.
+7. specialist 1차 검증 후 manager 최종 승인한다.
+8. Claude Task 상태를 갱신한다.
+
+모드 정의:
+- Mode A: Agent Teams 기반 (`teams + tasks`)
+- Mode B: Subagent Task 기반 (`tasks only`)
+- Mode B+Bootstrap: P1에서 teams skeleton 생성
 
 ## 2) Level Scoring Sheet
 
@@ -64,6 +71,18 @@ rollback_plan:
 - git revert <commit> or reset branch to <sha>
 ```
 
+## 4.1) Codex Run Command
+
+```bash
+cd /Users/jaebak/cocoding
+scripts/run-codex-handoff.sh handoffs/HOFF-YYYYMMDD-001.txt .
+```
+
+실행 전 체크:
+```bash
+command -v codex >/dev/null && codex exec --help >/dev/null
+```
+
 ## 5) Manager Prompt Skeleton (for Codex)
 
 ```text
@@ -104,9 +123,25 @@ Return format:
 
 ## 8) Git-Centric Retrieval Checklist
 
-1. `git diff --name-only <base>...<head>`
-2. 파일별 핵심 diff 확인
-3. 영향 범위 테스트 실행
-4. 실패 로그 최소 수집
-5. 승인/반려 결정 후 Task 반영
+1. `codex/<handoff_id>` 브랜치 생성 여부 확인
+2. `BASE=$(git merge-base main codex/<handoff_id>)`
+3. `git diff --name-only "$BASE"...codex/<handoff_id>`
+4. 파일별 핵심 diff 확인
+5. 영향 범위 테스트 실행
+6. 실패 로그 최소 수집
+7. 승인/반려 결정 후 Task 반영
 
+## 9) Example Scenario (L2)
+
+상황:
+- 대시보드 필터 기능 추가 (프론트만), 파일 5개 변경 예상
+- 레벨 판정: L2
+- 모드: Mode B(Subagent Task)
+
+절차:
+1. Manager가 Task를 `in_progress`로 전이
+2. handoff 파일 생성 (`handoffs/HOFF-20260213-001.txt`)
+3. `scripts/run-codex-handoff.sh` 실행
+4. `codex/HOFF-20260213-001` 브랜치에서 결과 회수
+5. frontend specialist 1차 검증
+6. manager 최종 승인 후 Task `completed`
